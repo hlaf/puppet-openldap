@@ -1,12 +1,16 @@
 # See README.md for details.
 define openldap::server::access (
-  Optional[Enum['present', 'absent']]  $ensure   = undef,
-  Optional[Variant[Integer,String[1]]] $position = undef, # FIXME We should probably choose Integer or String
-  Optional[String[1]]                  $what     = undef,
-  Optional[String[1]]                  $suffix   = undef,
-  Optional[Array[String[1]]]           $access   = undef,
+  String[1]                            $what,
+  Array[Openldap::Access_rule]         $access,
+  Enum['present', 'absent']            $ensure   = 'present',
+  Optional[Variant[Integer,String[1]]] $position = undef, # FIXME deprecated
+  Optional[String[1]]                  $suffix   = undef, # FIXME deprecated
 ) {
   include openldap::server
+
+  if $position or $suffix {
+    warning('openldap::server::access position and suffix are deprecated')
+  }
 
   Class['openldap::server::service']
   -> Openldap::Server::Access[$title]
@@ -14,10 +18,10 @@ define openldap::server::access (
 
   openldap_access { $title:
     ensure   => $ensure,
-    position => $position,
+    position => $position, # FIXME deprecated
     target   => $openldap::server::conffile,
     what     => $what,
-    suffix   => $suffix,
+    suffix   => $suffix, # FIXME deprecated
     access   => $access,
   }
 }
