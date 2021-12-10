@@ -34,9 +34,7 @@ describe 'openldap::server::access' do
       context 'with access as an array' do
         let(:params) do
           {
-            position: '0',
             what: 'to attrs=userPassword,shadowLastChange',
-            suffix: 'dc=example,dc=com',
             access: [
               'by dn="cn=admin,dc=example,dc=com" write',
               'by anonymous read',
@@ -47,9 +45,7 @@ describe 'openldap::server::access' do
         it { is_expected.to compile.with_all_deps }
         it {
           is_expected.to contain_openldap_access('0 on dc=example,dc=com').
-            with_position('0').
             with_what('to attrs=userPassword,shadowLastChange').
-            with_suffix('dc=example,dc=com').
             with_access(['by dn="cn=admin,dc=example,dc=com" write', 'by anonymous read'])
         }
       end
