@@ -12,6 +12,7 @@ Puppet::Type.type(:openldap_access).provide(:olc) do
 
   def self.instances
     # TODO: restict to bdb, hdb and globals
+
     i = []
     slapcat(
       '-b',
@@ -27,22 +28,33 @@ Puppet::Type.type(:openldap_access).provide(:olc) do
         when /^olcDatabase: /
           suffix = "cn=#{line.split(' ')[1].gsub(/\{-?\d+\}/, '')}"
         when /^olcSuffix: /
-          suffix = line.split(' ')[1]
+          suffix = line.split(' ')[1] if not suffix
         when /^olcAccess: /
-          position, what, bys = line.match(/^olcAccess:\s+\{(\d+)\}to\s+(\S+(?:\s+filter=\S+)?(?:\s+attrs=\S+)?)(\s+by\s+.*)+$/).captures
+          position, what, bys = line.match(/^olcAccess:\s+\{(\d+)\}to\s+(\S+(?:\s+filter=\S+)?(?:\s+attrs=\S+)?)((\s+by\s+\S+\s+\S+)+)\s*$/).captures
+          # p "suffix: #{suffix}"
+          # p "position: #{position}"
+          # p "what: #{what}"
+          # p "bys: #{bys}"
+
+          by_ = []
+          access_ = []
+          control_ = []
           bys.split(' by ')[1..-1].each { |b|
             by, access, control = b.strip.match(/^(\S+)\s+(\S+)(\s+\S+)?$/).captures
-            i << new(
-              :name     => "to #{what} by #{by} on #{suffix}",
+            by_.push(by)
+            access_.push(access)
+            control_.push(control)
+	  }
+          i << new(
+              :name     => "to #{what} by #{bys} on #{suffix}",
               :ensure   => :present,
               :position => position,
               :what     => what,
-              :by       => by,
+              :by       => by_,
               :suffix   => suffix,
-              :access   => access,
-              :control  => control
-            )
-          }
+              :access   => access_,
+              :control  => control_
+          )
         end
       end
     end
@@ -51,16 +63,47 @@ Puppet::Type.type(:openldap_access).provide(:olc) do
   end
 
   def self.prefetch(resources)
+    # Get the accesses currently available in the database
     accesses = instances
+    #p "accesses: #{accesses.map { |a| "(what: " + a.what + ', by: ' + a.by + ', suffix: ' + a.suffix + ")" }.join(" ")}"
     resources.keys.each do |name|
+      #p "resource: #{name}"
+      #p "  what: #{resources[name][:what]}"
+      #p "  by: #{resources[name][:by]}"
+      #p "  suffix: #{resources[name][:suffix]}"
+      #p "  position: #{resources[name][:position]}"
+      #p "  access: #{resources[name][:access]}"
       if provider = accesses.find{ |access|
-        access.what == resources[name][:what] &&
-          access.by == resources[name][:by] &&
+          access.position == resources[name][:position] &&
           access.suffix == resources[name][:suffix]
-      }
-        resources[name].provider = provider
+      } 
+        if provider.what == resources[name][:what] &&
+              provider.by == resources[name][:by] &&
+              provider.access == resources[name][:access]
+          #p "No change"
+          resources[name].provider = provider
+        else
+          #p "#{provider.by[0]}"
+          #p "The provider #{provider} matches the position but the entries differ - create a new entry"
+        end
+      else 
+        #p "No match"
       end
     end
+    
+    #accesses.each do |a|
+    #  unless resources.values.find { |r| r.provider.equal? a }
+    #      t = Tempfile.new('openldap_access')
+    #      t << "dn: #{self.getDn(a.suffix)}\n"
+    #      t << "changetype: modify\n"
+    #      t << "delete: olcAccess\n"
+    #      t << "olcAccess: {#{a.position}}\n"
+    #      t.close
+    #      Puppet.debug(IO.read t.path)
+    #      ldapmodify('-Y', 'EXTERNAL', '-H', 'ldapi:///', '-f', t.path)
+    #  end
+    #end
+
   end
 
   def getDn(suffix)
@@ -74,6 +117,17 @@ Puppet::Type.type(:openldap_access).provide(:olc) do
         'cn=config',
         '-H',
         "ldap:///???(olcDatabase=monitor)"
+      ).split("\n").collect do |line|
+        if line =~ /^dn: /
+          return line.split(' ')[1]
+        end
+      end
+    elsif suffix == 'cn=bdb'
+      slapcat(
+        '-b',
+        'cn=config',
+        '-H',
+        "ldap:///???(olcDatabase=bdb)"
       ).split("\n").collect do |line|
         if line =~ /^dn: /
           return line.split(' ')[1]
@@ -102,13 +156,33 @@ Puppet::Type.type(:openldap_access).provide(:olc) do
     t = Tempfile.new('openldap_access')
     t << "dn: #{getDn(resource[:suffix])}\n"
     t << "add: olcAccess\n"
-    t << "olcAccess: #{position}to #{resource[:what]} by #{resource[:by]} #{resource[:access]}\n"
+    t << "olcAccess: #{position}to #{resource[:what]}"
+    resource[:by] = [resource[:by]] unless resource[:by].kind_of?(Array)
+    access_ = resource[:access].split(" ")
+    $i = 0
+    until $i >= resource[:by].size do
+      t << " by #{resource[:by][$i]} #{access_[$i]}"
+      $i += 1;
+    end
+    t << "\n"
     t.close
     Puppet.debug(IO.read t.path)
     begin
       ldapmodify('-Y', 'EXTERNAL', '-H', 'ldapi:///', '-f', t.path)
     rescue Exception => e
-      raise Puppet::Error, "LDIF content:\n#{IO.read t.path}\nError message: #{e.message}"
+      t = Tempfile.new('openldap_access')
+      t << "dn: #{getDn(resource[:suffix])}\n"
+      t << "replace: olcAccess\n"
+      t << "olcAccess: #{position}to #{resource[:what]}"
+      $i = 0
+      until $i >= resource[:by].size do
+        t << " by #{resource[:by][$i]} #{access_[$i]}"
+        $i += 1;
+      end    
+      t << "\n"
+      t.close
+      ldapmodify('-Y', 'EXTERNAL', '-H', 'ldapi:///', '-f', t.path)
+      #raise Puppet::Error, "LDIF content:\n#{IO.read t.path}\nError message: #{e.message}"
     end
   end
 
