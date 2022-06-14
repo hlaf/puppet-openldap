@@ -25,8 +25,8 @@ class openldap::server::install {
     'RedHat' => undef,
   }
 
-  #package { $::openldap::server::package:
-  #  ensure       => "2.4.40-7.el6_7",
-  #  responsefile => $responsefile,
-  #}
+  package { $::openldap::server::package:
+    ensure       => present,
+    responsefile => $responsefile,
+  }
 }
